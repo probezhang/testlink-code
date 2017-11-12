@@ -15,6 +15,7 @@
  *
  */
 require('../../config.inc.php');
+require_once('../../third_party/codeplex/PHPExcel.php');
 require_once('common.php');
 require_once('csv.inc.php');
 require_once('xml.inc.php');
@@ -57,6 +58,10 @@ if ($args->do_upload)
         case 'XML':
           $pcheck_fn = "check_xml_tc_tsuite";
           $pimport_fn = "importTestCaseDataFromXML";
+          break;
+        case 'XLS':
+          $pcheck_fn = "check_xls_tc_tsuite";
+          $pimport_fn = "importTestCaseDataFromXLS";
           break;
       }
       if(!is_null($pcheck_fn))
@@ -174,6 +179,213 @@ function importTestCaseDataFromXML(&$db,$fileName,$parentID,$tproject_id,$userID
   return $resultMap;
 }
 
+function xlslog($content)
+{
+  global $tlCfg;
+  $logfile = $tlCfg->log_path . 'xls2xml' . ".log";
+  file_put_contents($logfile, $content,FILE_APPEND);
+}
+
+function domGetChild($root, $tagname, $name='')
+{
+  foreach($root->childNodes as $elem)
+  {
+    if($elem->nodeName == $tagname && (!$name || $elem->getAttribute('name') == $name))
+    {
+      return $elem;
+    }
+  }
+  return FALSE;
+}
+
+function convertXLS2XML(&$db,$fileName,$parentID,$tproject_id,$userID,$options=null)
+{
+  xlslog("file:". $fileName);
+  
+  $excel = new PHPExcel();
+  $reader = PHPExcel_IOFactory::createReaderForFile($fileName);    
+  $excel = $reader->load($fileName);
+  $sheetCount = $excel->getSheetCount();
+  xlslog("sheet:".$sheetCount);
+
+  if($sheetCount < 1)
+    return FALSE;
+
+  $sheet = $excel->getSheet(0);
+  $highestColumn = $sheet->getHighestColumn();
+  $highestRow = $sheet->getHighestRow();
+  if($highestColumn < 'G' || $highestRow < 2)
+    return FALSE;
+  xlslog("col:" . $highestColumn. ", row:" . $highestRow);
+  $doc = new DOMDocument('1.0', 'UTF-8');
+
+  $root=$doc->createElement('testsuite');
+  $doc->appendChild($root);
+  $root->setAttribute('name', '');
+  $node_order = $doc->createElement('node_order');
+  $root->appendChild($node_order);
+  $node_order->appendChild($doc->createCDATASection(''));
+  $details = $doc->createElement('details');
+  $details->appendChild($doc->createCDATASection(''));
+  $root->appendChild($details);
+
+  $testcase=FALSE;
+  $step_num = 0;
+
+  for($currentRow = 2; $currentRow <= $highestRow; $currentRow++)
+  {
+    xlslog("\nrow:" . $currentRow);
+    $path_str = $sheet->getCellByColumnAndRow(0, $currentRow)->getValue();
+    
+    if($path_str)
+    {
+      $parent = $root;
+      $step_num = 0;
+      $paths = explode('/', $path_str);
+      for($level = 0; $level < count($paths); $level++)
+      {
+        $dir_name = $paths[$level];
+        $testsuite=domGetChild($parent, 'testsuite', $dir_name);
+        if(!$testsuite)
+        {
+          $testsuite=$doc->createElement('testsuite');
+          $parent->appendChild($testsuite);
+
+          $testsuite->setAttribute('name', $dir_name);
+          xlslog("mkdir " . $dir_name);
+          $node_order = $doc->createElement('node_order');
+          $testsuite->appendChild($node_order);
+          $node_order->appendChild($doc->createCDATASection(''));
+          $details = $doc->createElement('details');
+          $details->appendChild($doc->createCDATASection(''));
+          $testsuite->appendChild($details);
+        }
+        
+        $parent = $testsuite;
+      }
+      
+      $case_name = $sheet->getCellByColumnAndRow(1, $currentRow)->getValue();
+      xlslog("casename:" . $case_name);
+
+      if($parent && $case_name)
+      {
+        $step_num = 0;
+        $testcase=domGetChild($parent, 'testcase', $case_name);
+        if($testcase)
+        {
+          unset($testcase->childNodes);
+          $testcase->childNodes=array();
+        }
+        else
+        {
+          $testcase=$doc->createElement('testcase');
+          $parent->appendChild($testcase);
+          $testcase->setAttribute('name', $case_name);
+        }
+        $node_order = $doc->createElement('node_order');
+        $node_order->appendChild($doc->createCDATASection(''));
+        $testcase->appendChild($node_order);
+
+        $summary_value = $sheet->getCellByColumnAndRow(2, $currentRow)->getValue();
+        $summary = $doc->createElement('summary');
+        $summary->appendChild($doc->createCDATASection("<p>". $summary_value . "</p>"));
+        $testcase->appendChild($summary);
+
+        $keywords_value = explode(',', $sheet->getCellByColumnAndRow(3, $currentRow)->getValue());
+        $keywords = $doc->createElement('keywords');
+        $testcase->appendChild($keywords);
+        foreach($keywords_value as $keyword_value)
+        {
+          $keyword = $doc->createElement('keyword');
+          $keyword->setAttribute('name', $keyword_value);
+          $keyword->appendChild($doc->createCDATASection(''));
+          $keywords->appendChild($keyword);
+        }
+
+        $preconditions_value = $sheet->getCellByColumnAndRow(4, $currentRow)->getValue();
+        $preconditions = $doc->createElement('preconditions');
+        $preconditions->appendChild($doc->createCDATASection(sprintf("<p>%s</p>", $preconditions_value)));
+        $testcase->appendChild($preconditions);
+      }
+    }
+
+    if($testcase)
+    {
+      $step_num++;
+      $steps = domGetChild($testcase, 'steps');
+      if(!$steps)
+      {
+        $steps=$doc->createElement('steps');
+        $testcase->appendChild($steps);
+      }
+      $step = $doc->createElement('step');
+      $steps->appendChild($step);
+
+      $step_number = $doc->createElement('step_number');
+      $step_number->appendChild($doc->createCDATASection("". $step_num));
+      $step->appendChild($step_number);
+
+      $actions_value = $sheet->getCellByColumnAndRow(5, $currentRow)->getValue();
+      $actions = $doc->createElement('actions');
+      $actions->appendChild($doc->createCDATASection($actions_value));
+      $step->appendChild($actions);
+
+      $expectedresults_value = $sheet->getCellByColumnAndRow(6, $currentRow)->getValue();
+      $expectedresults = $doc->createElement('expectedresults');
+      $expectedresults->appendChild($doc->createCDATASection("<p>" . $expectedresults_value . "</p>"));
+      $step->appendChild($expectedresults);
+
+      xlslog("case:" . $testcase->getAttribute('name') . ",step:" . $step_num . ",actions:" . $actions_value . ",expectedresults:" . $expectedresults_value);
+    }
+  }
+
+  $newName = $fileName . ".xls2xml";
+  xlslog("saving" . $newName);
+  file_put_contents($newName, $doc->saveXML());
+  return $newName;
+}
+
+function check_xls_tc_tsuite($fileName,$recursiveMode)
+{
+  $file_check = array('status_ok' => 0, 'msg' => 'xls_ko');
+  try{
+    $excel = new PHPExcel();   
+    $reader = PHPExcel_IOFactory::createReaderForFile($fileName);    
+    $excel = $reader->load($fileName);
+    $sheetCount = $excel->getSheetCount();
+
+    if($sheetCount < 1)
+    {
+      $errmsg = sprintf("sheetCount:%d",$sheetCount);
+      $file_check = array('status_ok' => 0, 'msg' => $errmsg);
+      return $file_check;
+    }
+    $sheet = $excel->getSheet(0);
+    $highestColumn = $sheet->getHighestColumn();
+    $highestRow = $sheet->getHighestRow();
+    if($highestColumn < 'G')
+    {
+      $errmsg = sprintf("sheetCount:%d,col:%s,row:%d",$sheetCount, $highestColumn, $highestRow);
+      $file_check = array('status_ok' => 0, 'msg' => $errmsg);
+      return $file_check;
+    }
+    $file_check = array('status_ok' => 1, 'msg' => 'ok');
+  }catch(Exception $e){
+
+  }
+  return $file_check;
+}
+
+function importTestCaseDataFromXLS(&$db,$fileName,$parentID,$tproject_id,$userID,$options=null)
+{
+  xlslog('importTestCaseDataFromXLS called for file: '. $fileName);
+  $resultMap  = null;
+
+  $newName = convertXLS2XML($db,$fileName,$parentID,$tproject_id,$userID,$options);  
+  if($newName)
+    $resultMap = importTestCaseDataFromXML($db,$newName,$parentID,$tproject_id,$userID,$options);
+  return $resultMap;
+}
 
 // --------------------------------------------------------------------------------------
 /*
@@ -1145,7 +1357,7 @@ function initializeGui(&$dbHandler,&$argsObj)
 
 
   $dest_common = TL_TEMP_PATH . session_id(). "-importtcs";
-  $dest_files = array('XML' => $dest_common . ".xml");
+  $dest_files = array('XML' => $dest_common . ".xml", 'XLS' => $dest_common . ".xls");
   $guiObj->dest = $dest_files['XML'];
   if(!is_null($argsObj->importType))
   {

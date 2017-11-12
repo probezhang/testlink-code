@@ -43,7 +43,7 @@ class testsuite extends tlObjectWithAttachments
   var $cfield_mgr;
 
 
-  var $import_file_types = array("XML" => "XML");
+  var $import_file_types = array("XML" => "XML", "XLS" => "XLS" );
   var $export_file_types = array("XML" => "XML");
  
   // Node Types (NT)
