@@ -44,7 +44,7 @@ class testsuite extends tlObjectWithAttachments
 
 
   var $import_file_types = array("XML" => "XML", "XLS" => "XLS" );
-  var $export_file_types = array("XML" => "XML");
+  var $export_file_types = array("XML" => "XML", "XLS" => "XLS" );
  
   // Node Types (NT)
   var $nt2exclude=array('testplan' => 'exclude_me',
@@ -1279,7 +1279,60 @@ class testsuite extends tlObjectWithAttachments
     $xmlTC .= $doRecursion ? "</testsuite>" : "</testcases>"; 
     return $xmlTC;
   }
+
+  function exportTestSuiteDataToXLSObj(&$excel, $container_id, $tproject_id, $optExport = array())
+  {
+    static $tcase_mgr;
+    $doRecursion = isset($optExport['RECURSIVE']) ? $optExport['RECURSIVE'] : 0;    
+    $test_spec = $this->get_subtree($container_id,self::USE_RECURSIVE_MODE);
+    $childNodes = isset($test_spec['childNodes']) ? $test_spec['childNodes'] : null ;
+    if( !is_null($childNodes) )
+    {
+      $loop_qty=sizeof($childNodes); 
+      for($idx = 0;$idx < $loop_qty;$idx++)
+      {
+        $cNode = $childNodes[$idx];
+        $nTable = $cNode['node_table'];
+        if ($doRecursion && $nTable == 'testsuites')
+        {
+          if(!$this->exportTestSuiteDataToXLSObj($excel,$cNode['id'],$tproject_id,$optExport))
+            return FALSE;
+        }
+        else if ($nTable == 'testcases')
+        {
+          if( is_null($tcase_mgr) )
+          {
+            $tcase_mgr = new testcase($this->db);
+          }
+          if(!$tcase_mgr->exportTestCaseDataToXLSObj($excel,$cNode['id'],testcase::LATEST_VERSION,
+                                                        $tproject_id,true,$optExport))
+            return FALSE;
+        }
+      }
+    }
+    return TRUE;
+  }
   
+  function exportTestSuiteDataToXLS($container_id,$tproject_id,$optExport = array())
+  {
+    static $tcase_mgr;
+    if(is_null($tcase_mgr) )
+    {
+      $tcase_mgr = new testcase($this->db);
+    }
+    $excel = new PHPExcel();
+    $tcase_mgr->exportTestCaseHeadToXlsObj($excel);
+    if(!$this->exportTestSuiteDataToXLSObj($excel,$container_id,$tproject_id,$optExport))
+      return FALSE;
+
+    $xlsType = 'Excel5';                               
+    $objWriter = PHPExcel_IOFactory::createWriter($excel, $xlsType);
+    $tmpfname = tempnam(config_get('temp_dir'),"testsuite.tmp");
+    $objWriter->save($tmpfname);
+    $content = file_get_contents($tmpfname);
+    unlink($tmpfname);
+    return $content;
+  }
   
   // -------------------------------------------------------------------------------
   // Custom field related methods

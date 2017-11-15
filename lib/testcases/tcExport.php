@@ -26,8 +26,6 @@ $gui = initializeGui($args);
 $node_id = $args->container_id;
 $check_children = 0;
 
-
-
 if($args->useRecursion)
 {
   // Exporting situations:
@@ -75,7 +73,6 @@ else
 }
 $gui->export_filename = is_null($args->export_filename) ? $gui->export_filename : $args->export_filename;
 
-
 if( $check_children )
 {
   // Check if there is something to export
@@ -111,20 +108,45 @@ if ($args->doExport)
         $pfn = 'exportTestCaseDataToXML';
       }
       break;
+    case 'XLS':
+      $pfn = 'exportTestSuiteDataToXLS';
+      if ($gui->oneTestCaseExport)
+      {
+        $pfn = 'exportTestCaseDataToXLS';
+      }
+      break;
   }
 
   if ($pfn)
   {
     if ($gui->oneTestCaseExport)
     {
-      $args->optExport['RELATIONS'] = true;
-      $args->optExport['ROOTELEM'] = "<testcases>{{XMLCODE}}</testcases>";
-      $content = $tcase_mgr->$pfn($args->tcase_id,$args->tcversion_id,$args->tproject_id,null,$args->optExport);
+      switch($args->exportType)
+      {
+      case 'XML':
+        $args->optExport['RELATIONS'] = true;
+        $args->optExport['ROOTELEM'] = "<testcases>{{XMLCODE}}</testcases>";
+        $content = $tcase_mgr->$pfn($args->tcase_id,$args->tcversion_id,$args->tproject_id,null,$args->optExport);
+        break;
+      case 'XLS':
+        $gui->export_filename .= '.xls';
+        $content = $tcase_mgr->$pfn($args->tcase_id,$args->tcversion_id,$args->tproject_id,null,$args->optExport);
+        break;
+      }
     }
     else
     {
-      $content = TL_XMLEXPORT_HEADER;
-      $content .= $tsuite_mgr->$pfn($args->container_id,$args->tproject_id,$args->optExport);
+      switch($args->exportType)
+      {
+      case 'XML':
+        $content = TL_XMLEXPORT_HEADER;
+        $content .= $tsuite_mgr->$pfn($args->container_id,$args->tproject_id,$args->optExport);
+        break;
+      case 'XLS':
+        $gui->export_filename .= '.xls';
+        $content = $tsuite_mgr->$pfn($args->container_id,$args->tproject_id,$args->optExport);
+        break;
+      }
     }
 
     downloadContentsToFile($content,$gui->export_filename);
@@ -192,7 +214,7 @@ function init_args(&$dbHandler)
   {
     $xd = strtoupper(trim($_REQUEST['exportType']));
     $args->exportType = isset($args->exportTypes[$xd]) ? $args->exportTypes[$xd] : null;
-  }  
+  }
 
   $args->export_filename=isset($_REQUEST['export_filename']) ? $_REQUEST['export_filename'] : null;
 

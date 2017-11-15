@@ -17,6 +17,7 @@ require_once( dirname(__FILE__) . '/assignment_mgr.class.php' );
 require_once( dirname(__FILE__) . '/attachments.inc.php' );
 require_once( dirname(__FILE__) . '/users.inc.php' );
 require_once( dirname(__FILE__) . '/event_api.php');
+require_once('../../third_party/codeplex/PHPExcel.php'); 
 
 /** list of supported format for Test case import/export */
 $g_tcFormatStrings = array ("XML" => lang_get('the_format_tc_xml_import'));
@@ -62,7 +63,7 @@ class testcase extends tlObjectWithAttachments
   var $cfield_mgr;
 
   var $import_file_types = array("XML" => "XML");
-  var $export_file_types = array("XML" => "XML");
+  var $export_file_types = array("XML" => "XML", "XLS" => "XLS");
   var $execution_types = array();
   var $cfg;
   var $debugMsg;
@@ -3980,6 +3981,135 @@ class testcase extends tlObjectWithAttachments
       return $xmlTC;
   }
 
+  function exportTestCaseDataToXLSObj(&$excel,$tcase_id,$tcversion_id,$tproject_id=null,
+                                   $bNoXMLHeader = false,$optExport = array())
+  {
+    static $keywordMgr;
+    if( is_null($keywordMgr) )
+    {
+      $keywordMgr = new tlKeyword();
+    }
+
+    // Useful when you need to get info but do not have tcase id
+    $tcase_id = intval((int)($tcase_id));
+    $tcversion_id = intval((int)($tcversion_id));
+    if( $tcase_id <= 0 && $tcversion_id > 0)
+    {
+      $info = $this->tree_manager->get_node_hierarchy_info($tcversion_id);
+      $tcase_id = $info['parent_id'];
+    }
+
+    //   function get_by_id($id,$version_id = self::ALL_VERSIONS, $filters = null, $options=null)
+    $opt = array('getPrefix' => false);
+    if(!isset($optExport['EXTERNALID']) || $optExport['EXTERNALID'])
+    {
+      $opt = array('getPrefix' => (isset($optExport['ADDPREFIX']) && $optExport['ADDPREFIX']));
+    }
+    $tc_data = $this->get_by_id($tcase_id,$tcversion_id,null,$opt);
+    if(!$tc_data)
+      return FALSE;
+    $tcaseData = $tc_data[0];
+
+    $testCaseVersionID = $tcaseData['id'];
+    if (!$tproject_id)
+    {
+      $tproject_id = $this->getTestProjectFromTestCase($tcase_id);
+    }
+
+    /*
+      $info = array("{{TESTCASE_ID}}" => "testcase_id",
+                    "{{NAME}}" => "name",
+                    "||NODE_ORDER||" => "node_order",
+                    "||EXEC_ORDER||" => "exec_order",
+                    "||EXTERNALID||" => "tc_external_id",
+                    "||FULLEXTERNALID||" => "fullExternalID",
+                    "||VERSION||" => "version",
+                    "||SUMMARY||" => "summary",
+                    "||PRECONDITIONS||" => "preconditions",
+                    "||EXECUTIONTYPE||" => "execution_type",
+                    "||IMPORTANCE||" => "importance",
+                    "||ESTIMATED_EXEC_DURATION||" => "estimated_exec_duration",
+                    "||STATUS||" => "status",
+                    "||ISOPEN||" => "is_open",
+                    "||ACTIVE||" => "active",
+                    "||STEPS||" => "xmlsteps",
+                    "||KEYWORDS||" => "xmlkeywords",
+                    "||CUSTOMFIELDS||" => "xmlcustomfields",
+                    "||REQUIREMENTS||" => "xmlrequirements",
+                    "||ATTACHMENTS||" => "xmlattachments",
+                    "||RELATIONS||" => "xmlrelations");
+      */
+
+    $keywords_str = '';
+    if (isset($optExport['KEYWORDS']) && $optExport['KEYWORDS'])
+    {
+      $keywords = $this->getKeywords($tcase_id);
+      if(!is_null($keywords))
+      {
+        $keywords_list = array();
+        foreach($keywords as $keyword)
+        {
+          $keywords_list[] = $keyword['keyword'];
+        }
+        $keywords_str = implode(',', $keywords_list);
+      }
+    }
+
+    //$excel->setActiveSheetIndex(0)->getStyle($cellID)->getAlignment()->setWrapText(true);
+    $paths = $this->tree_manager->get_path($tcase_id);
+    $path_str = '';
+    for($level = 0; $level < count($paths) - 1; $level++)
+    {
+      if($path_str)
+          $path_str .= '/';
+      $path_str .= $paths[$level]['name'];
+    }
+    $sheet = $excel->setActiveSheetIndex(0);
+    $currentRow = $sheet->getHighestRow() + 1;
+    $sheet->setCellValue("A" . $currentRow, $path_str)
+      ->setCellValue("B" . $currentRow, $tcaseData['name'])
+      ->setCellValue("C" . $currentRow, html_entity_decode(strip_tags($tcaseData['summary'])))
+      ->setCellValue("D" . $currentRow, $keywords_str)
+      ->setCellValue("E" . $currentRow, html_entity_decode(strip_tags($tcaseData['preconditions'])));
+    
+    foreach($tcaseData['steps'] as $step)
+    {
+      $sheet->setCellValue("F" . $currentRow, html_entity_decode(strip_tags($step['actions'])))
+        ->setCellValue("G" . $currentRow, html_entity_decode(strip_tags($step['expected_results'])));
+      $currentRow = $sheet->getHighestRow() + 1;
+    }
+    
+    return TRUE;
+  }
+
+  function exportTestCaseHeadToXlsObj(&$excel)
+  {
+    $sheet = $excel->setActiveSheetIndex(0);
+    $sheet->setCellValue("A1", "测试用例路径")
+      ->setCellValue("B1", "测试用例名称")
+      ->setCellValue("C1", "测试用例描述")
+      ->setCellValue("D1", "关键字(逗号分隔)")
+      ->setCellValue("E1", "前提")
+      ->setCellValue("F1", "步骤描述")
+      ->setCellValue("G1", "预期结果");
+  }
+
+  function exportTestCaseDataToXLS($tcase_id,$tcversion_id,$tproject_id=null,
+                                   $bNoXMLHeader = false,$optExport = array())
+  {
+    $excel = new PHPExcel();
+    $this->exportTestCaseHeadToXlsObj($excel);
+    if(!$this->exportTestCaseDataToXLSObj($excel,$tcase_id,$tcversion_id,$tproject_id,$bNoXMLHeader,$optExport))
+      return FALSE;
+
+    $xlsType = 'Excel5';                               
+    $objWriter = PHPExcel_IOFactory::createWriter($excel, $xlsType);
+    $tmpfname = tempnam(config_get('temp_dir'),"testcase.tmp");
+    $objWriter->save($tmpfname);
+    $content = file_get_contents($tmpfname);
+    unlink($tmpfname);
+    return $content;
+  }
 
   /*
     function: get_version_exec_assignment

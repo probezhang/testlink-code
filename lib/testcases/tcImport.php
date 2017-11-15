@@ -179,13 +179,6 @@ function importTestCaseDataFromXML(&$db,$fileName,$parentID,$tproject_id,$userID
   return $resultMap;
 }
 
-function xlslog($content)
-{
-  global $tlCfg;
-  $logfile = $tlCfg->log_path . 'xls2xml' . ".log";
-  file_put_contents($logfile, $content,FILE_APPEND);
-}
-
 function domGetChild($root, $tagname, $name='')
 {
   foreach($root->childNodes as $elem)
@@ -200,13 +193,11 @@ function domGetChild($root, $tagname, $name='')
 
 function convertXLS2XML(&$db,$fileName,$parentID,$tproject_id,$userID,$options=null)
 {
-  xlslog("file:". $fileName);
   
   $excel = new PHPExcel();
   $reader = PHPExcel_IOFactory::createReaderForFile($fileName);    
   $excel = $reader->load($fileName);
   $sheetCount = $excel->getSheetCount();
-  xlslog("sheet:".$sheetCount);
 
   if($sheetCount < 1)
     return FALSE;
@@ -216,7 +207,6 @@ function convertXLS2XML(&$db,$fileName,$parentID,$tproject_id,$userID,$options=n
   $highestRow = $sheet->getHighestRow();
   if($highestColumn < 'G' || $highestRow < 2)
     return FALSE;
-  xlslog("col:" . $highestColumn. ", row:" . $highestRow);
   $doc = new DOMDocument('1.0', 'UTF-8');
 
   $root=$doc->createElement('testsuite');
@@ -234,7 +224,6 @@ function convertXLS2XML(&$db,$fileName,$parentID,$tproject_id,$userID,$options=n
 
   for($currentRow = 2; $currentRow <= $highestRow; $currentRow++)
   {
-    xlslog("\nrow:" . $currentRow);
     $path_str = $sheet->getCellByColumnAndRow(0, $currentRow)->getValue();
     
     if($path_str)
@@ -252,7 +241,6 @@ function convertXLS2XML(&$db,$fileName,$parentID,$tproject_id,$userID,$options=n
           $parent->appendChild($testsuite);
 
           $testsuite->setAttribute('name', $dir_name);
-          xlslog("mkdir " . $dir_name);
           $node_order = $doc->createElement('node_order');
           $testsuite->appendChild($node_order);
           $node_order->appendChild($doc->createCDATASection(''));
@@ -265,8 +253,6 @@ function convertXLS2XML(&$db,$fileName,$parentID,$tproject_id,$userID,$options=n
       }
       
       $case_name = $sheet->getCellByColumnAndRow(1, $currentRow)->getValue();
-      xlslog("casename:" . $case_name);
-
       if($parent && $case_name)
       {
         $step_num = 0;
@@ -288,7 +274,7 @@ function convertXLS2XML(&$db,$fileName,$parentID,$tproject_id,$userID,$options=n
 
         $summary_value = $sheet->getCellByColumnAndRow(2, $currentRow)->getValue();
         $summary = $doc->createElement('summary');
-        $summary->appendChild($doc->createCDATASection("<p>". $summary_value . "</p>"));
+        $summary->appendChild($doc->createCDATASection('<p>' . $summary_value . '</p>'));
         $testcase->appendChild($summary);
 
         $keywords_value = explode(',', $sheet->getCellByColumnAndRow(3, $currentRow)->getValue());
@@ -304,7 +290,7 @@ function convertXLS2XML(&$db,$fileName,$parentID,$tproject_id,$userID,$options=n
 
         $preconditions_value = $sheet->getCellByColumnAndRow(4, $currentRow)->getValue();
         $preconditions = $doc->createElement('preconditions');
-        $preconditions->appendChild($doc->createCDATASection(sprintf("<p>%s</p>", $preconditions_value)));
+        $preconditions->appendChild($doc->createCDATASection('<p>' . $preconditions_value . '</p>'));
         $testcase->appendChild($preconditions);
       }
     }
@@ -327,20 +313,17 @@ function convertXLS2XML(&$db,$fileName,$parentID,$tproject_id,$userID,$options=n
 
       $actions_value = $sheet->getCellByColumnAndRow(5, $currentRow)->getValue();
       $actions = $doc->createElement('actions');
-      $actions->appendChild($doc->createCDATASection($actions_value));
+      $actions->appendChild($doc->createCDATASection('<p>'. $actions_value . '</p>'));
       $step->appendChild($actions);
 
       $expectedresults_value = $sheet->getCellByColumnAndRow(6, $currentRow)->getValue();
       $expectedresults = $doc->createElement('expectedresults');
-      $expectedresults->appendChild($doc->createCDATASection("<p>" . $expectedresults_value . "</p>"));
+      $expectedresults->appendChild($doc->createCDATASection('<p>' . $expectedresults_value . '</p>'));
       $step->appendChild($expectedresults);
-
-      xlslog("case:" . $testcase->getAttribute('name') . ",step:" . $step_num . ",actions:" . $actions_value . ",expectedresults:" . $expectedresults_value);
     }
   }
 
   $newName = $fileName . ".xls2xml";
-  xlslog("saving" . $newName);
   file_put_contents($newName, $doc->saveXML());
   return $newName;
 }
@@ -378,12 +361,13 @@ function check_xls_tc_tsuite($fileName,$recursiveMode)
 
 function importTestCaseDataFromXLS(&$db,$fileName,$parentID,$tproject_id,$userID,$options=null)
 {
-  xlslog('importTestCaseDataFromXLS called for file: '. $fileName);
+  tLog('importTestCaseDataFromXLS called for file: '. $fileName);
   $resultMap  = null;
 
   $newName = convertXLS2XML($db,$fileName,$parentID,$tproject_id,$userID,$options);  
   if($newName)
     $resultMap = importTestCaseDataFromXML($db,$newName,$parentID,$tproject_id,$userID,$options);
+  unlink($newName);
   return $resultMap;
 }
 
